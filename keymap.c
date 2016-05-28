@@ -110,13 +110,6 @@ uint16_t oh_base_timer = 0;
 uint16_t oh_bsspc_timer = 0;
 uint16_t oh_entsft_timer = 0;
 
-#define OH_BLINK_INTERVAL 500
-
-uint8_t oh_left_blink = 0;
-uint16_t oh_left_blink_timer = 0;
-uint8_t oh_right_blink = 0;
-uint16_t oh_right_blink_timer = 0;
-
 enum {
   CP_EMACS = 0,
   CP_TERM  = 1,
@@ -481,6 +474,69 @@ void ang_handle_kf (keyrecord_t *record, uint8_t id)
   }
 }
 
+/** LED ANIMATION LIBRARY */
+
+typedef struct _led_state_t led_state_t;
+
+struct _led_state_t
+{
+  uint8_t brightness;
+  uint8_t target;
+  int8_t step;
+  void (*finish_cb) (led_state_t *state);
+} _led_state_t;
+
+static led_state_t leds[3];
+
+void led_anim_init (void) {
+  ergodox_led_all_set (0);
+  ergodox_led_all_off ();
+}
+
+void led_anim_iterate (void) {
+  for (int idx = 0; idx < 3; idx++) {
+    if (leds[idx].step == 0)
+      continue;
+    if (leds[idx].target > leds[idx].brightness) {
+      uint16_t n = (uint16_t)leds[idx].brightness + (uint16_t)leds[idx].step;
+      if (n >= leds[idx].target)
+        leds[idx].brightness = leds[idx].target;
+      else
+        leds[idx].brightness = (uint8_t) n;
+
+      if (leds[idx].brightness >= leds[idx].target && leds[idx].finish_cb)
+        leds[idx].finish_cb (&leds[idx]);
+    } else {
+      int16_t n = (int16_t)leds[idx].brightness + (int16_t)leds[idx].step;
+      if (n <= leds[idx].target)
+        leds[idx].brightness = leds[idx].target;
+      else
+        leds[idx].brightness = (uint8_t) n;
+
+      if (leds[idx].brightness <= leds[idx].target && leds[idx].finish_cb)
+        leds[idx].finish_cb (&leds[idx]);
+    }
+
+    if (leds[idx].brightness > 0)
+      ergodox_right_led_on (idx + 1);
+    else
+      ergodox_right_led_off (idx + 1);
+  }
+}
+
+void led_anim_fade_cb (led_state_t *state) {
+  state->finish_cb = NULL;
+}
+
+void led_anim_breathe_cb (led_state_t *state) {
+  if (state->target >= LED_BRIGHTNESS_HI)
+    state->target = LED_BRIGHTNESS_LO;
+  else
+    state->target = LED_BRIGHTNESS_HI;
+}
+
+/** /LED ANIMATION LIBRARY */
+
 const macro_t *action_get_macro(keyrecord_t *record, uint8_t id, uint8_t opt)
 {
       switch(id) {
@@ -767,19 +823,15 @@ const macro_t *action_get_macro(keyrecord_t *record, uint8_t id, uint8_t opt)
 
       case OH_LEFT:
         if (record->event.pressed) {
+          leds[0].target = LED_BRIGHTNESS_LO;
           layer_move (OHLFT);
-          oh_left_blink = 1;
-          oh_left_blink_timer = timer_read ();
-          ergodox_right_led_1_on ();
         }
         break;
 
       case OH_RIGHT:
         if (record->event.pressed) {
+          leds[2].target = LED_BRIGHTNESS_LO;
           layer_move (OHRGT);
-          oh_right_blink = 1;
-          oh_right_blink_timer = timer_read ();
-          ergodox_right_led_3_on ();
         }
         break;
       }
@@ -788,17 +840,7 @@ const macro_t *action_get_macro(keyrecord_t *record, uint8_t id, uint8_t opt)
 
 // Runs just one time when the keyboard initializes.
 void matrix_init_user(void) {
-  ergodox_led_all_on();
-  for (int i = LED_BRIGHTNESS_HI; i > LED_BRIGHTNESS_LO; i--) {
-    ergodox_led_all_set (i);
-    _delay_ms (5);
-  }
-  _delay_ms(1000);
-  for (int i = LED_BRIGHTNESS_LO; i > 0; i--) {
-    ergodox_led_all_set (i);
-    _delay_ms (10);
-  }
-  ergodox_led_all_off();
+  led_anim_init ();
 };
 
 LEADER_EXTERNS();
@@ -830,73 +872,69 @@ void matrix_scan_user(void) {
   if (gui_timer && timer_elapsed (gui_timer) > TAPPING_TERM)
     unregister_code (KC_LGUI);
 
-  if (layer != OHLFT)
-    oh_left_blink = 0;
-  if (layer != OHRGT)
-    oh_right_blink = 0;
+  switch (layer) {
+  case OHLFT:
+    leds[0].finish_cb = led_anim_breathe_cb;
+    leds[0].target = LED_BRIGHTNESS_LO;
+    leds[1].finish_cb = led_anim_fade_cb;
+    leds[1].target = LED_BRIGHTNESS_HI;
+    leds[2].finish_cb = led_anim_fade_cb;
+    leds[2].target = 0;
+    break;
 
-  if (layer == HUN) {
-    ergodox_right_led_2_on();
-    ergodox_right_led_3_on();
-  } else if (layer == EMACS) {
-    ergodox_right_led_1_on();
-    ergodox_right_led_2_on();
-  }
+  case OHRGT:
+    leds[0].finish_cb = led_anim_fade_cb;
+    leds[0].target = 0;
+    leds[1].finish_cb = led_anim_fade_cb;
+    leds[1].target = LED_BRIGHTNESS_HI;
+    leds[2].finish_cb = led_anim_breathe_cb;
+    leds[2].target = LED_BRIGHTNESS_LO;
+    break;
 
-  if (layer == OHLFT || layer == OHRGT) {
-    ergodox_right_led_2_on();
+  case HUN:
+    leds[0].target = 0;
+    leds[0].finish_cb = led_anim_fade_cb;
+    leds[1].target = LED_BRIGHTNESS_LO;
+    leds[1].finish_cb = led_anim_fade_cb;
+    leds[2].target = LED_BRIGHTNESS_LO;
+    leds[2].finish_cb = led_anim_fade_cb;
+    break;
 
-    if (oh_left_blink) {
-      if (timer_elapsed (oh_left_blink_timer) > OH_BLINK_INTERVAL) {
-        if ((keyboard_report->mods & MOD_BIT(KC_LSFT)) == 0)
-          ergodox_right_led_1_off ();
-      }
-      if (timer_elapsed (oh_left_blink_timer) > OH_BLINK_INTERVAL * 2) {
-        ergodox_right_led_1_on ();
-        oh_left_blink_timer = timer_read ();
-      }
-    }
-
-    if (oh_right_blink) {
-      if (timer_elapsed (oh_right_blink_timer) > OH_BLINK_INTERVAL) {
-        if ((keyboard_report->mods & MOD_BIT(KC_LCTRL)) == 0)
-          ergodox_right_led_3_off ();
-      }
-      if (timer_elapsed (oh_right_blink_timer) > OH_BLINK_INTERVAL * 2) {
-        ergodox_right_led_3_on ();
-        oh_right_blink_timer = timer_read ();
-      }
-    }
+  case EMACS:
+    leds[0].target = LED_BRIGHTNESS_LO;
+    leds[0].finish_cb = led_anim_fade_cb;
+    leds[1].target = LED_BRIGHTNESS_LO;
+    leds[1].finish_cb = led_anim_fade_cb;
+    leds[2].target = 0;
+    leds[2].finish_cb = led_anim_fade_cb;
+    break;
   }
 
   if (keyboard_report->mods & MOD_BIT(KC_LSFT) ||
       ((get_oneshot_mods() & MOD_BIT(KC_LSFT)) && !has_oneshot_mods_timed_out())) {
-    ergodox_right_led_1_set (LED_BRIGHTNESS_HI);
-    ergodox_right_led_1_on ();
-  } else {
-    ergodox_right_led_1_set (LED_BRIGHTNESS_LO);
-    if (layer != OHLFT && layer != EMACS)
-      ergodox_right_led_1_off ();
+    leds[0].target = LED_BRIGHTNESS_HI;
+    if (keyboard_report->mods & MOD_BIT(KC_LSFT))
+      leds[0].finish_cb = led_anim_fade_cb;
+    else
+      leds[0].finish_cb = led_anim_breathe_cb;
   }
 
   if (keyboard_report->mods & MOD_BIT(KC_LALT) ||
       ((get_oneshot_mods() & MOD_BIT(KC_LALT)) && !has_oneshot_mods_timed_out())) {
-    ergodox_right_led_2_set (LED_BRIGHTNESS_HI);
-    ergodox_right_led_2_on ();
-  } else {
-    ergodox_right_led_2_set (LED_BRIGHTNESS_LO);
-    if (layer != OHRGT && layer != HUN && layer != OHLFT && layer != EMACS)
-      ergodox_right_led_2_off ();
+    leds[1].target = LED_BRIGHTNESS_HI;
+    if (keyboard_report->mods & MOD_BIT(KC_LALT))
+      leds[1].finish_cb = led_anim_fade_cb;
+    else
+      leds[1].finish_cb = led_anim_breathe_cb;
   }
 
   if (keyboard_report->mods & MOD_BIT(KC_LCTRL) ||
       ((get_oneshot_mods() & MOD_BIT(KC_LCTRL)) && !has_oneshot_mods_timed_out())) {
-    ergodox_right_led_3_set (LED_BRIGHTNESS_HI);
-    ergodox_right_led_3_on ();
-  } else {
-    ergodox_right_led_3_set (LED_BRIGHTNESS_LO);
-    if (layer != OHRGT && layer != HUN)
-      ergodox_right_led_3_off ();
+    leds[2].target = LED_BRIGHTNESS_HI;
+    if (keyboard_report->mods & MOD_BIT(KC_LCTRL))
+      leds[2].finish_cb = led_anim_fade_cb;
+    else
+      leds[2].finish_cb = led_anim_breathe_cb;
   }
 
   LEADER_DICTIONARY() {
@@ -941,4 +979,6 @@ void matrix_scan_user(void) {
       unregister_code (KC_LGUI);
     }
   }
+
+  led_anim_iterate ();
 }
