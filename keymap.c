@@ -491,6 +491,9 @@ static led_state_t leds[3];
 void led_anim_init (void) {
   ergodox_led_all_set (0);
   ergodox_led_all_off ();
+  leds[0].step = 1;
+  leds[1].step = 2;
+  leds[2].step = 3;
 }
 
 void led_anim_iterate (void) {
