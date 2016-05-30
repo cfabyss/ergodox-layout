@@ -145,7 +145,7 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
  */
 [BASE] = KEYMAP(
 // left hand
- KC_GRV             ,M(KF_1)     ,M(KF_2)     ,M(KF_3),M(KF_4),M(KF_5),KC_APP
+ KC_GRV             ,M(KF_1)     ,M(KF_2)     ,M(KF_3),M(KF_4),M(KF_5),DEBUG
 ,KC_TAB             ,KC_QUOT     ,KC_COMM     ,KC_DOT ,KC_P   ,KC_Y   ,KC_LBRC
 ,KC_MINS            ,KC_A        ,KC_O        ,KC_E   ,KC_U   ,KC_I
 ,KC_MPLY            ,KC_SCLN     ,KC_Q        ,KC_J   ,KC_K   ,KC_X   ,KC_LPRN
@@ -482,22 +482,16 @@ struct _led_state_t
 {
   uint8_t brightness;
   uint8_t target;
-  int8_t step;
+  uint8_t step;
   void (*finish_cb) (led_state_t *state);
 } _led_state_t;
 
-static led_state_t leds[3];
-
-void led_anim_init (void) {
-  ergodox_led_all_set (0);
-  ergodox_led_all_off ();
-  leds[0].step = 1;
-  leds[1].step = 2;
-  leds[2].step = 3;
-}
+led_state_t leds[3];
 
 void led_anim_iterate (void) {
   for (int idx = 0; idx < 3; idx++) {
+    uint8_t prev_brightness = leds[idx].brightness;
+
     if (leds[idx].step == 0)
       continue;
     if (leds[idx].target > leds[idx].brightness) {
@@ -507,23 +501,35 @@ void led_anim_iterate (void) {
       else
         leds[idx].brightness = (uint8_t) n;
 
-      if (leds[idx].brightness >= leds[idx].target && leds[idx].finish_cb)
+      if ((leds[idx].brightness >= leds[idx].target) && leds[idx].finish_cb)
         leds[idx].finish_cb (&leds[idx]);
     } else {
-      int16_t n = (int16_t)leds[idx].brightness + (int16_t)leds[idx].step;
+      int16_t n = (int16_t)leds[idx].brightness - (int16_t)leds[idx].step;
+      dprintf ("led[%d].n = %d, %d, %d\n", idx, n, (uint8_t) n, leds[idx].target);
       if (n <= leds[idx].target)
         leds[idx].brightness = leds[idx].target;
       else
         leds[idx].brightness = (uint8_t) n;
 
-      if (leds[idx].brightness <= leds[idx].target && leds[idx].finish_cb)
+      if ((leds[idx].brightness <= leds[idx].target) && leds[idx].finish_cb)
         leds[idx].finish_cb (&leds[idx]);
     }
 
-    if (leds[idx].brightness > 0)
-      ergodox_right_led_on (idx + 1);
-    else
-      ergodox_right_led_off (idx + 1);
+    if (leds[idx].brightness != prev_brightness) {
+      ergodox_right_led_set (idx + 1, leds[idx].brightness);
+        if (leds[idx].brightness > 0)
+          ergodox_right_led_on (idx + 1);
+        else
+          ergodox_right_led_off (idx + 1);
+    }
+  }
+
+  for (int i = 0; i < 3; i++) {
+    dprintf ("led[%d] = {br: %d, target: %d, step %d}\n",
+             i,
+             leds[i].brightness,
+             leds[i].target,
+             leds[i].step);
   }
 }
 
@@ -532,10 +538,29 @@ void led_anim_fade_cb (led_state_t *state) {
 }
 
 void led_anim_breathe_cb (led_state_t *state) {
-  if (state->target >= LED_BRIGHTNESS_HI)
-    state->target = LED_BRIGHTNESS_LO;
+  dprintf ("led[0] breathe\n");
+  if (state->target >= LED_BRIGHTNESS_LO)
+    state->target = 0;
   else
-    state->target = LED_BRIGHTNESS_HI;
+    state->target = LED_BRIGHTNESS_LO;
+  state->finish_cb = NULL;
+}
+
+void led_anim_init (void) {
+  ergodox_led_all_set (0);
+  ergodox_led_all_off ();
+  leds[0].step = 1;
+  leds[0].target = 0;
+  leds[0].brightness = 0;
+  leds[0].finish_cb = led_anim_fade_cb;
+  leds[1].step = 1;
+  leds[1].target = 0;
+  leds[1].brightness = 0;
+  leds[1].finish_cb = led_anim_fade_cb;
+  leds[2].step = 1;
+  leds[2].target = 0;
+  leds[2].brightness = 0;
+  leds[2].finish_cb = led_anim_fade_cb;
 }
 
 /** /LED ANIMATION LIBRARY */
@@ -844,6 +869,7 @@ const macro_t *action_get_macro(keyrecord_t *record, uint8_t id, uint8_t opt)
 // Runs just one time when the keyboard initializes.
 void matrix_init_user(void) {
   led_anim_init ();
+  debug_enable = true;
 };
 
 LEADER_EXTERNS();
@@ -872,10 +898,21 @@ void ang_tap (uint16_t codes[]) {
 void matrix_scan_user(void) {
   uint8_t layer = biton32(layer_state);
 
+  debug_enable = true;
+
   if (gui_timer && timer_elapsed (gui_timer) > TAPPING_TERM)
     unregister_code (KC_LGUI);
 
   switch (layer) {
+  case BASE:
+    leds[0].finish_cb = led_anim_fade_cb;
+    leds[0].target = 0;
+    leds[1].finish_cb = led_anim_fade_cb;
+    leds[1].target = 0;
+    leds[2].finish_cb = led_anim_fade_cb;
+    leds[2].target = 0;
+    break;
+
   case OHLFT:
     leds[0].finish_cb = led_anim_breathe_cb;
     leds[0].target = LED_BRIGHTNESS_LO;
@@ -940,6 +977,8 @@ void matrix_scan_user(void) {
       leds[2].finish_cb = led_anim_breathe_cb;
   }
 
+  led_anim_iterate ();
+
   LEADER_DICTIONARY() {
     leading = false;
     leader_end ();
@@ -982,6 +1021,4 @@ void matrix_scan_user(void) {
       unregister_code (KC_LGUI);
     }
   }
-
-  led_anim_iterate ();
 }
