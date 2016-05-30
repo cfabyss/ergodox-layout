@@ -483,12 +483,32 @@ struct _led_state_t
   uint8_t brightness;
   uint8_t target;
   uint8_t step;
-  void (*finish_cb) (led_state_t *state);
+  void (*finish_cb) (uint8_t idx);
 } _led_state_t;
 
 led_state_t leds[3];
 
+void led_anim_fade_cb (uint8_t idx) {
+  leds[idx].finish_cb = NULL;
+}
+
+void led_anim_breathe_cb (uint8_t idx) {
+  dprintf ("led[%d] breathe\n", idx);
+  if (leds[idx].target >= LED_BRIGHTNESS_LO)
+    leds[idx].target = 0;
+  else
+    leds[idx].target = LED_BRIGHTNESS_LO;
+}
+
 void led_anim_iterate (void) {
+  for (int i = 0; i < 3; i++) {
+    dprintf ("START: led[%d] = {br: %d, target: %d, step %d}\n",
+             i,
+             leds[i].brightness,
+             leds[i].target,
+             leds[i].step);
+  }
+
   for (int idx = 0; idx < 3; idx++) {
     uint8_t prev_brightness = leds[idx].brightness;
 
@@ -500,9 +520,6 @@ void led_anim_iterate (void) {
         leds[idx].brightness = leds[idx].target;
       else
         leds[idx].brightness = (uint8_t) n;
-
-      if ((leds[idx].brightness >= leds[idx].target) && leds[idx].finish_cb)
-        leds[idx].finish_cb (&leds[idx]);
     } else {
       int16_t n = (int16_t)leds[idx].brightness - (int16_t)leds[idx].step;
       dprintf ("led[%d].n = %d, %d, %d\n", idx, n, (uint8_t) n, leds[idx].target);
@@ -510,40 +527,28 @@ void led_anim_iterate (void) {
         leds[idx].brightness = leds[idx].target;
       else
         leds[idx].brightness = (uint8_t) n;
-
-      if ((leds[idx].brightness <= leds[idx].target) && leds[idx].finish_cb)
-        leds[idx].finish_cb (&leds[idx]);
     }
 
     if (leds[idx].brightness != prev_brightness) {
       ergodox_right_led_set (idx + 1, leds[idx].brightness);
-        if (leds[idx].brightness > 0)
-          ergodox_right_led_on (idx + 1);
-        else
-          ergodox_right_led_off (idx + 1);
+      if (leds[idx].brightness > 0)
+        ergodox_right_led_on (idx + 1);
+      else
+        ergodox_right_led_off (idx + 1);
+
+      if ((leds[idx].brightness == leds[idx].target) && leds[idx].finish_cb)
+        leds[idx].finish_cb (idx);
     }
   }
 
   for (int i = 0; i < 3; i++) {
-    dprintf ("led[%d] = {br: %d, target: %d, step %d}\n",
+    dprintf ("END  : led[%d] = {br: %d, target: %d, step %d, cb: %s}\n",
              i,
              leds[i].brightness,
              leds[i].target,
-             leds[i].step);
+             leds[i].step,
+             (leds[i].finish_cb == led_anim_fade_cb) ? "fade" : "breathe");
   }
-}
-
-void led_anim_fade_cb (led_state_t *state) {
-  state->finish_cb = NULL;
-}
-
-void led_anim_breathe_cb (led_state_t *state) {
-  dprintf ("led[0] breathe\n");
-  if (state->target >= LED_BRIGHTNESS_LO)
-    state->target = 0;
-  else
-    state->target = LED_BRIGHTNESS_LO;
-  state->finish_cb = NULL;
 }
 
 void led_anim_init (void) {
@@ -915,7 +920,6 @@ void matrix_scan_user(void) {
 
   case OHLFT:
     leds[0].finish_cb = led_anim_breathe_cb;
-    leds[0].target = LED_BRIGHTNESS_LO;
     leds[1].finish_cb = led_anim_fade_cb;
     leds[1].target = LED_BRIGHTNESS_HI;
     leds[2].finish_cb = led_anim_fade_cb;
@@ -928,7 +932,6 @@ void matrix_scan_user(void) {
     leds[1].finish_cb = led_anim_fade_cb;
     leds[1].target = LED_BRIGHTNESS_HI;
     leds[2].finish_cb = led_anim_breathe_cb;
-    leds[2].target = LED_BRIGHTNESS_LO;
     break;
 
   case HUN:
@@ -953,15 +956,17 @@ void matrix_scan_user(void) {
   if (keyboard_report->mods & MOD_BIT(KC_LSFT) ||
       ((get_oneshot_mods() & MOD_BIT(KC_LSFT)) && !has_oneshot_mods_timed_out())) {
     leds[0].target = LED_BRIGHTNESS_HI;
-    if (keyboard_report->mods & MOD_BIT(KC_LSFT))
-      leds[0].finish_cb = led_anim_fade_cb;
-    else
+    leds[0].step = 10;
+    //    if ((get_oneshot_mods() & MOD_BIT(KC_LSFT)) && !has_oneshot_mods_timed_out())
       leds[0].finish_cb = led_anim_breathe_cb;
+      //    else
+      //      leds[0].finish_cb = led_anim_fade_cb;
   }
 
   if (keyboard_report->mods & MOD_BIT(KC_LALT) ||
       ((get_oneshot_mods() & MOD_BIT(KC_LALT)) && !has_oneshot_mods_timed_out())) {
     leds[1].target = LED_BRIGHTNESS_HI;
+    leds[1].step = 10;
     if (keyboard_report->mods & MOD_BIT(KC_LALT))
       leds[1].finish_cb = led_anim_fade_cb;
     else
