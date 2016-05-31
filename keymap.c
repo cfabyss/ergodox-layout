@@ -476,6 +476,14 @@ void ang_handle_kf (keyrecord_t *record, uint8_t id)
 
 /** LED ANIMATION LIBRARY */
 
+enum {
+  LED_NONE = 0,
+  LED_FADE,
+  LED_BREATHE,
+  LED_BREATHE_TO,
+  LED_BREATHE_FROM,
+};
+
 typedef struct _led_state_t led_state_t;
 
 struct _led_state_t
@@ -483,6 +491,7 @@ struct _led_state_t
   uint8_t brightness;
   uint8_t target;
   uint8_t step;
+  uint8_t state;
   void (*finish_cb) (uint8_t idx);
 } _led_state_t;
 
@@ -490,14 +499,32 @@ led_state_t leds[3];
 
 void led_anim_fade_cb (uint8_t idx) {
   leds[idx].finish_cb = NULL;
+  leds[idx].state = LED_NONE;
 }
 
 void led_anim_breathe_cb (uint8_t idx) {
   dprintf ("led[%d] breathe\n", idx);
-  if (leds[idx].target >= LED_BRIGHTNESS_LO)
+  if (leds[idx].target == LED_BRIGHTNESS_HI)
+    leds[idx].target = LED_BRIGHTNESS_LO + 1;
+  else if (leds[idx].target > LED_BRIGHTNESS_LO)
+    leds[idx].target = LED_BRIGHTNESS_HI;
+  else if (leds[idx].target == LED_BRIGHTNESS_LO)
     leds[idx].target = 0;
   else
     leds[idx].target = LED_BRIGHTNESS_LO;
+}
+
+void led_anim_set_state (uint8_t idx, uint8_t state, uint8_t target) {
+  dprintf ("set_state: idx=%d, state=%d, target=%d\n", idx, state, target);
+  if (state == leds[idx].state)
+    return;
+
+  leds[idx].target = target;
+  leds[idx].state = state;
+  if (state == LED_FADE)
+    leds[idx].finish_cb = led_anim_fade_cb;
+  else if (state != LED_NONE)
+    leds[idx].finish_cb = led_anim_breathe_cb;
 }
 
 void led_anim_iterate (void) {
@@ -535,10 +562,9 @@ void led_anim_iterate (void) {
         ergodox_right_led_on (idx + 1);
       else
         ergodox_right_led_off (idx + 1);
-
-      if ((leds[idx].brightness == leds[idx].target) && leds[idx].finish_cb)
-        leds[idx].finish_cb (idx);
     }
+    if ((leds[idx].brightness == leds[idx].target) && leds[idx].finish_cb)
+      leds[idx].finish_cb (idx);
   }
 
   for (int i = 0; i < 3; i++) {
@@ -856,14 +882,12 @@ const macro_t *action_get_macro(keyrecord_t *record, uint8_t id, uint8_t opt)
 
       case OH_LEFT:
         if (record->event.pressed) {
-          leds[0].target = LED_BRIGHTNESS_LO;
           layer_move (OHLFT);
         }
         break;
 
       case OH_RIGHT:
         if (record->event.pressed) {
-          leds[2].target = LED_BRIGHTNESS_LO;
           layer_move (OHRGT);
         }
         break;
@@ -904,63 +928,50 @@ void matrix_scan_user(void) {
   uint8_t layer = biton32(layer_state);
 
   debug_enable = true;
+  uint8_t shifted = keyboard_report->mods & MOD_BIT(KC_LSFT) ||
+    ((get_oneshot_mods() & MOD_BIT(KC_LSFT)) && !has_oneshot_mods_timed_out());
 
   if (gui_timer && timer_elapsed (gui_timer) > TAPPING_TERM)
     unregister_code (KC_LGUI);
 
   switch (layer) {
   case BASE:
-    leds[0].finish_cb = led_anim_fade_cb;
-    leds[0].target = 0;
-    leds[1].finish_cb = led_anim_fade_cb;
-    leds[1].target = 0;
-    leds[2].finish_cb = led_anim_fade_cb;
-    leds[2].target = 0;
+    if (!shifted)
+      led_anim_set_state (0, LED_FADE, 0);
+    led_anim_set_state (1, LED_FADE, 0);
+    led_anim_set_state (2, LED_FADE, 0);
     break;
 
   case OHLFT:
-    leds[0].finish_cb = led_anim_breathe_cb;
-    leds[1].finish_cb = led_anim_fade_cb;
-    leds[1].target = LED_BRIGHTNESS_HI;
-    leds[2].finish_cb = led_anim_fade_cb;
-    leds[2].target = 0;
+    led_anim_set_state (0, LED_BREATHE, LED_BRIGHTNESS_LO);
+    led_anim_set_state (1, LED_FADE, LED_BRIGHTNESS_HI);
+    led_anim_set_state (2, LED_FADE, 0);
     break;
 
   case OHRGT:
-    leds[0].finish_cb = led_anim_fade_cb;
-    leds[0].target = 0;
-    leds[1].finish_cb = led_anim_fade_cb;
-    leds[1].target = LED_BRIGHTNESS_HI;
-    leds[2].finish_cb = led_anim_breathe_cb;
+    led_anim_set_state (0, LED_FADE, 0);
+    led_anim_set_state (1, LED_FADE, LED_BRIGHTNESS_HI);
+    led_anim_set_state (2, LED_BREATHE, LED_BRIGHTNESS_LO);
     break;
 
   case HUN:
-    leds[0].target = 0;
-    leds[0].finish_cb = led_anim_fade_cb;
-    leds[1].target = LED_BRIGHTNESS_LO;
-    leds[1].finish_cb = led_anim_fade_cb;
-    leds[2].target = LED_BRIGHTNESS_LO;
-    leds[2].finish_cb = led_anim_fade_cb;
+    led_anim_set_state (0, LED_FADE, 0);
+    led_anim_set_state (1, LED_FADE, LED_BRIGHTNESS_LO);
+    led_anim_set_state (2, LED_FADE, LED_BRIGHTNESS_LO);
     break;
 
   case EMACS:
-    leds[0].target = LED_BRIGHTNESS_LO;
-    leds[0].finish_cb = led_anim_fade_cb;
-    leds[1].target = LED_BRIGHTNESS_LO;
-    leds[1].finish_cb = led_anim_fade_cb;
-    leds[2].target = 0;
-    leds[2].finish_cb = led_anim_fade_cb;
+    led_anim_set_state (0, LED_FADE, LED_BRIGHTNESS_LO);
+    led_anim_set_state (1, LED_FADE, LED_BRIGHTNESS_LO);
+    led_anim_set_state (2, LED_FADE, 0);
     break;
   }
 
-  if (keyboard_report->mods & MOD_BIT(KC_LSFT) ||
-      ((get_oneshot_mods() & MOD_BIT(KC_LSFT)) && !has_oneshot_mods_timed_out())) {
-    leds[0].target = LED_BRIGHTNESS_HI;
-    leds[0].step = 10;
-    //    if ((get_oneshot_mods() & MOD_BIT(KC_LSFT)) && !has_oneshot_mods_timed_out())
-      leds[0].finish_cb = led_anim_breathe_cb;
-      //    else
-      //      leds[0].finish_cb = led_anim_fade_cb;
+  if (shifted) {
+    if ((get_oneshot_mods() & MOD_BIT(KC_LSFT)) && !has_oneshot_mods_timed_out())
+      led_anim_set_state (0, LED_FADE, LED_BRIGHTNESS_HI);
+    else
+      led_anim_set_state (0, LED_BREATHE, LED_BRIGHTNESS_HI);
   }
 
   if (keyboard_report->mods & MOD_BIT(KC_LALT) ||
