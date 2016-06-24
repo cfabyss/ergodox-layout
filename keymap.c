@@ -94,7 +94,8 @@ enum {
 /* Custom keycodes */
 
 enum {
-  CT_CLN = 0x7101
+  CT_CLN = 0, // : and ;
+  CT_SE,      // SPC & Enter
 };
 
 /* States & timers */
@@ -113,9 +114,6 @@ uint8_t oh_left_blink = 0;
 uint16_t oh_left_blink_timer = 0;
 uint8_t oh_right_blink = 0;
 uint16_t oh_right_blink_timer = 0;
-
-uint8_t ct_cln_count = 0;
-uint16_t ct_cln_timer = 0;
 
 /* The Keymap */
 
@@ -148,7 +146,7 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
 ,M(A_MPN)           ,KC_QUOT     ,KC_COMM     ,KC_DOT ,KC_P   ,KC_Y   ,KC_LBRC
 ,KC_TAB             ,KC_A        ,KC_O        ,KC_E   ,KC_U   ,KC_I
 ,KC_MPLY            ,KC_SLSH     ,KC_Q        ,KC_J   ,KC_K   ,KC_X   ,KC_LPRN
-,KC_NO              ,KC_NO       ,KC_LEFT     ,KC_UP  ,CT_CLN
+,KC_NO              ,KC_NO       ,KC_LEFT     ,KC_UP  ,TD(CT_CLN)
 
                                                             ,F(F_ALT),F(F_GUI)
                                                                      ,F(F_CTRL)
@@ -182,9 +180,9 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
  *                                         ,-------------.           ,-------------.
  *                                         | LAlt | GUI  |           | MDIA | ARRW |
  *                                  ,------|------|------|           |------+------+------.
- *                                  |      |      | Ctrl |           | LEAD |      |      |
- *                                  |Backsp|LShift|------|           |------| Enter| Space|
- *                                  |      |      | ESC  |           | HUN  |      |      |
+ *                                  |      |      | Ctrl |           | LEAD |      | Enter|
+ *                                  |   E  |LShift|------|           |------|BackSp|      |
+ *                                  |      |      | ESC  |           | HUN  |      | Space|
  *                                  `--------------------'           `--------------------'
  */
 [EXPRM] = KEYMAP(
@@ -193,11 +191,11 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
 ,M(A_MPN)           ,KC_QUOT     ,KC_COMM     ,KC_DOT ,KC_P   ,KC_Y   ,KC_LBRC
 ,KC_TAB             ,KC_A        ,KC_O        ,KC_E   ,KC_U   ,KC_I
 ,KC_MPLY            ,KC_Z        ,KC_G        ,KC_V   ,KC_K   ,KC_X   ,KC_LPRN
-,KC_NO              ,KC_NO       ,KC_LEFT     ,KC_UP  ,CT_CLN
+,KC_NO              ,KC_NO       ,KC_LEFT     ,KC_UP  ,TD(CT_CLN)
 
                                                             ,F(F_ALT),F(F_GUI)
                                                                      ,F(F_CTRL)
-                                                    ,KC_BSPC,F(F_SFT),M(A_ESC)
+                                                    ,KC_E   ,F(F_SFT),M(A_ESC)
 
                                                                 // right hand
                                                                ,M(OH_LEFT),M(KF_6),M(KF_7),M(KF_8),M(KF_9)     ,M(KF_10)    ,KC_F11
@@ -208,7 +206,7 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
 
                                                                ,OSL(NMDIA),OSL(ARRW)
                                                                ,KC_LEAD
-                                                               ,F(F_HUN)  ,KC_ENT ,KC_SPC
+                                                               ,F(F_HUN)  ,KC_BSPC,TD(CT_SE)
     ),
 
 /* Keymap 2: Arrow layer
@@ -843,12 +841,6 @@ const macro_t *action_get_macro(keyrecord_t *record, uint8_t id, uint8_t opt)
       return MACRO_NONE;
 };
 
-struct {
-  uint8_t count;
-  uint16_t keycode;
-  uint16_t timer;
-} dt_key;
-
 // Runs just one time when the keyboard initializes.
 void matrix_init_user(void) {
   ergodox_led_all_on();
@@ -862,8 +854,6 @@ void matrix_init_user(void) {
     _delay_ms (10);
   }
   ergodox_led_all_off();
-  dt_key.keycode = 0;
-  dt_key.count = 0;
 };
 
 LEADER_EXTERNS();
@@ -892,20 +882,25 @@ void ang_tap (uint16_t codes[]) {
 
 uint8_t is_exp = 0;
 
-void dt_user (void) {
-  switch (dt_key.keycode) {
-  case CT_CLN:
-    if (dt_key.count == 1) {
+void ang_tap_dance (qk_tap_dance_state_t *state) {
+  switch (state->keycode) {
+  case TD(CT_CLN):
+    if (state->count == 1) {
       register_code (KC_RSFT);
       register_code (KC_SCLN);
       unregister_code (KC_SCLN);
       unregister_code (KC_RSFT);
-    } else if (dt_key.count == 2) {
+    } else if (state->count == 2) {
       register_code (KC_SCLN);
       unregister_code (KC_SCLN);
     }
   }
 }
+
+const qk_tap_dance_action_t tap_dance_actions[] = {
+  [CT_CLN] = ACTION_TAP_DANCE_FN (ang_tap_dance)
+ ,[CT_SE]  = ACTION_TAP_DANCE_DOUBLE (KC_SPC, KC_ENT)
+};
 
 // Runs constantly in the background, in a loop.
 void matrix_scan_user(void) {
@@ -914,11 +909,7 @@ void matrix_scan_user(void) {
   if (gui_timer && timer_elapsed (gui_timer) > TAPPING_TERM)
     unregister_code (KC_LGUI);
 
-  if (dt_key.keycode && timer_elapsed (dt_key.timer) > TAPPING_TERM) {
-    dt_user();
-    dt_key.keycode = 0;
-    dt_key.count = 0;
-  }
+  matrix_scan_tap_dance ();
 
   if (layer != OHLFT)
     oh_left_blink = 0;
@@ -1086,26 +1077,4 @@ void matrix_scan_user(void) {
       }
     }
   }
-}
-
-bool process_record_user (uint16_t keycode, keyrecord_t *record) {
-  switch(keycode) {
-  case CT_CLN:
-    if (record->event.pressed) {
-      dt_key.keycode = keycode;
-      dt_key.timer = timer_read ();
-      dt_key.count++;
-    }
-    return false;
-
-  default:
-    if (dt_key.keycode) {
-      dt_user ();
-      dt_key.keycode = 0;
-      dt_key.count = 0;
-    }
-    break;
-  }
-
-  return true;
 }
