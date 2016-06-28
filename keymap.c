@@ -882,6 +882,7 @@ void ang_tap (uint16_t codes[]) {
 
 uint8_t is_exp = 0;
 
+#if TAP_DANCE_ENABLE
 void ang_tap_dance (qk_tap_dance_state_t *state) {
   switch (state->keycode) {
   case TD(CT_CLN):
@@ -890,9 +891,12 @@ void ang_tap_dance (qk_tap_dance_state_t *state) {
       register_code (KC_SCLN);
       unregister_code (KC_SCLN);
       unregister_code (KC_RSFT);
-    } else if (state->count == 2) {
+    } else if (state->count >= 2) {
       register_code (KC_SCLN);
       unregister_code (KC_SCLN);
+
+      state->keycode = 0;
+      state->count = 0;
     }
   }
 }
@@ -901,6 +905,7 @@ const qk_tap_dance_action_t tap_dance_actions[] = {
   [CT_CLN] = ACTION_TAP_DANCE_FN (ang_tap_dance)
  ,[CT_SE]  = ACTION_TAP_DANCE_DOUBLE (KC_SPC, KC_ENT)
 };
+#endif
 
 // Runs constantly in the background, in a loop.
 void matrix_scan_user(void) {
@@ -908,8 +913,6 @@ void matrix_scan_user(void) {
 
   if (gui_timer && timer_elapsed (gui_timer) > TAPPING_TERM)
     unregister_code (KC_LGUI);
-
-  matrix_scan_tap_dance ();
 
   if (layer != OHLFT)
     oh_left_blink = 0;
