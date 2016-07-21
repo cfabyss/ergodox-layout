@@ -138,6 +138,12 @@ def load_keylog(fname, restrict_row):
         total = total + 1
     return total / 2, keylog
 
+def keylog_to_keymap(keylog, base_map):
+    keymap = {}
+    for (c, r) in keylog:
+        keymap[tuple(coord(c, r))] = keylog[(c, r)]
+    return keymap
+
 def l_flat(s):
     f = s.split("\n")
     return ", ".join (f)
@@ -163,15 +169,15 @@ def main(base_fn, log_fn, coords = "dvorak", restrict_row = None):
     for (c, r) in log:
         max_cnt = max(max_cnt, log[(c, r)])
 
+    keymap = keylog_to_keymap (log, cr_coord_map)
+
     # Create the heatmap
-    for (c, r) in log:
-        coords = coord(c, r)
-        b, n = coords
+    for (b, n) in keymap:
         cap = max_cnt
-        v = float(log[(c, r)]) / cap
-        print >> sys.stderr, "%s => %d/%d => %f = %s" % (l_flat(layout[b][n+1]), log[(c,r)], cap, v, heatmap_color(v))
-        set_bg (layout, coord(c, r), heatmap_color (v))
-        set_tap_info (layout, coord (c, r), log[(c, r)], total)
+        v = float(keymap[(b, n)]) / cap
+        print >> sys.stderr, "%s => %d/%d => %f = %s" % (l_flat(layout[b][n+1]), keymap[(b, n)], cap, v, heatmap_color(v))
+        set_bg (layout, [b, n], heatmap_color (v))
+        set_tap_info (layout, [b, n], keymap[(b, n)], total)
 
     print json.dumps(layout)
 
