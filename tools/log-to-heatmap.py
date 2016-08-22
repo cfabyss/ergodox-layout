@@ -5,6 +5,7 @@ import sys
 import re
 
 from math import floor
+from os.path import dirname, walk
 
 cr_coord_map = [
     [
@@ -90,9 +91,11 @@ def load_keylog(fname, restrict_row):
     with open(fname, "r") as f:
         lines = f.readlines()
     for line in lines:
-        m = re.search ('KL: col=(\d+), row=(\d+)', line)
+        m = re.search ('KL: col=(\d+), row=(\d+), pressed=(\d+), layer=(.*)', line)
         if not m:
-            continue
+            m = re.search ('KL: col=(\d+), row=(\d+)', line)
+            if not m:
+                continue
         (c, r) = (int(m.group (2)), int(m.group (1)))
         if restrict_row != None and r != int(restrict_row):
             continue
@@ -107,17 +110,33 @@ def l_flat(s):
     f = s.split("\n")
     return ", ".join (f)
 
-def main(base_fn, log_fn, restrict_row = None):
+def load_layouts (base_dir):
+    layouts = {}
 
-    with open(base_fn, "r") as f:
-        layout = json.load (f)
+    def maybe_load_layouts(arg, dirname, fnames):
+        for f in fnames:
+            if f.startswith("heatmap-layout."):
+                l = re.findall("heatmap-layout\.(.*)\.json", f)[0]
+                with open("%s/%s" % (base_dir, f), "r") as fh:
+                    layouts[l] = json.load(fh)
 
-    ## Reset colors
-    for row in cr_coord_map:
-        for col in row:
-            if col != []:
-                set_bg (layout, col, "#d9dae0")
-                #set_attr_at (layout, col[0], col[1], "g", set_attr, True)
+    walk(base_dir, maybe_load_layouts, None)
+
+    return layouts
+
+def clear_layouts(layouts):
+    for l in layouts.keys():
+        ## Reset colors
+        for row in cr_coord_map:
+            for col in row:
+                if col != []:
+                    set_bg (layouts[l], col, "#d9dae0")
+                    #set_attr_at (layouts[l], col[0], col[1], "g", set_attr, True)
+
+def main(base_dir, log_fn, restrict_row = None):
+    layouts = load_layouts(base_dir)
+
+    clear_layouts(layouts)
 
     total, log = load_keylog (log_fn, restrict_row)
     max_cnt = 0
@@ -130,6 +149,7 @@ def main(base_fn, log_fn, restrict_row = None):
         b, n = coords
         cap = max_cnt
         v = float(log[(c, r)]) / cap
+        layout = layouts['Dvorak']
         print >> sys.stderr, "%s => %d/%d => %f = %s" % (l_flat(layout[b][n+1]), log[(c,r)], cap, v, heatmap_color(v))
         set_bg (layout, coord(c, r), heatmap_color (v))
         set_tap_info (layout, coord (c, r), log[(c, r)], total)
@@ -137,9 +157,9 @@ def main(base_fn, log_fn, restrict_row = None):
     print json.dumps(layout)
 
 if __name__ == "__main__":
-    if len(sys.argv) < 3:
+    if len(sys.argv) < 2:
         print """Log to Heatmap -- creates a heatmap out of keyboard logs
 
-Usage: log-to-heatmap.py base-layout.json logfile [row] >layout.json"""
+Usage: log-to-heatmap.py logfile [row] >layout.json"""
         sys.exit (1)
-    main(*sys.argv[1:])
+    main(dirname(sys.argv[0]), *sys.argv[1:])
